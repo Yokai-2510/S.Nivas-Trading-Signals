@@ -1,5 +1,3 @@
----
-
 # Automated Trading Signal Engine for NSE
 
 **An advanced, configurable, GUI-based tool to scan the Indian stock market (Nifty 500 & F&O stocks) for high-probability swing and momentum trading opportunities.**
