@@ -1,0 +1,44 @@
+{
+    "file_paths": {
+        "output_dir": "source",
+        "n500_tickers_file": "source/tickers_nifty500.csv",
+        "n500_ohlcv_file": "source/ohlcv_nifty500.csv",
+        "fno_tickers_file": "source/tickers_fno.csv",
+        "fno_ohlcv_file": "source/ohlcv_fno.csv"
+    },
+    "data_urls": {
+        "nifty500_tickers_url": "https://nsearchives.nseindia.com/content/indices/ind_nifty500list.csv",
+        "fno_tickers_url": "https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz"
+    },
+    "data_settings": {
+        "n500_fetch_tickers": true,
+        "n500_fetch_ohlcv": true,
+        "fno_fetch_tickers": true,
+        "fno_fetch_ohlcv": true,
+        "history_period": "2y",
+        "data_interval": "1d"
+    },
+    "swing_rules": {
+        "ema_period_1": 50,
+        "ema_period_2": 200,
+        "rsi_period": 14,
+        "rsi_range_min": 45,
+        "rsi_range_max": 60,
+        "volume_avg_period": 20,
+        "volume_factor": 1.5,
+        "adx_period": 14,
+        "adx_min": 20
+    },
+    "momentum_rules": {
+        "ema_period_1": 20,
+        "ema_period_2": 50,
+        "ema_period_3": 200,
+        "rsi_period": 14,
+        "rsi_min": 60,
+        "volume_avg_period": 20,
+        "volume_factor": 2.0
+    },
+    "export_settings": {
+        "excel_format": "Single File with Multiple Sheets"
+    }
+}
