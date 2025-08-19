@@ -1,7 +1,3 @@
-Of course. A high-quality README is the cornerstone of any good project. It serves as both a user manual and a developer's guide.
-
-Here is a complete, detailed README file that covers the project's objective, architecture, features, setup, and a thorough explanation of every single trading signal implemented.
-
 ---
 
 # Automated Trading Signal Engine for NSE
