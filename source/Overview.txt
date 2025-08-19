@@ -1,16 +1,8 @@
 Automated Signal Engine for Swing and Momentum Trading (NSE India)
 
-
-🎯 Objective:
-
 To develop a Python-based semi-automated signal engine that scans Nifty 500 stocks & F&O stocks daily, evaluates each against a custom 10-point checklist, and shortlists stocks for:
 	•	✅ Swing Trading
 	•	⚡ Momentum Trading
-
-The goal is to streamline trade discovery and reduce manual screening.
-
-
-⚙ Core Features:
 
 Daily Stock Screening
 	•	Universe: Nifty 500 stocks & F&O stocks so
@@ -32,4 +24,5 @@ Delivery % ≥ 30–40%
 	•	Score (e.g., 8/10)
 	•	Individual checklist match (✅/❌ or True/False)
 	•	Comments (e.g., RSI = 52, Volume = 1.6x)
+
 
