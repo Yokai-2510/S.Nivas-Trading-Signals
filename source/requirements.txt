@@ -1,0 +1,6 @@
+# --- START OF FILE requirements.txt ---
+pandas
+yfinance
+requests
+openpyxl
+customtkinter
