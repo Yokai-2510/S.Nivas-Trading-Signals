@@ -27,7 +27,8 @@
         "volume_avg_period": 20,
         "volume_factor": 1.5,
         "adx_period": 14,
-        "adx_min": 20
+        "adx_min": 20,
+        "delivery_perc_min": 35.0  
     },
     "momentum_rules": {
         "ema_period_1": 20,
@@ -36,7 +37,8 @@
         "rsi_period": 14,
         "rsi_min": 60,
         "volume_avg_period": 20,
-        "volume_factor": 2.0
+        "volume_factor": 2.0,
+        "delivery_perc_min": 40.0  
     },
     "export_settings": {
         "excel_format": "Single File with Multiple Sheets"
