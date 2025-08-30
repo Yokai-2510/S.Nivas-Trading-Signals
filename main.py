@@ -5,11 +5,11 @@ import os
 import json
 import pandas as pd
 from datetime import datetime
-from engine import fetch_data, indicators, format_dataset, create_report
+from engine import fetch_data, indicators, format_dataset, create_report, fetch_delivery_data
 
 class Engine:
-
-    def __init__(self, log_callback, progress_callback):
+    def __init__(self, app_path, log_callback, progress_callback):
+        self.app_path = app_path
         self.log = log_callback
         self.update_progress = progress_callback
         self.stop_event = threading.Event()
@@ -17,9 +17,13 @@ class Engine:
         self.analysis_reports = {}
 
     def _load_config(self):
+        config_path = os.path.join(self.app_path, "source", "config.json")
         try:
-            with open("source/config.json", "r") as f: return json.load(f)
-        except Exception as e: self.log(f"ERROR: config.json invalid: {e}", "ERROR"); return {}
+            with open(config_path, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            self.log(f"ERROR: config.json invalid or not found at '{config_path}': {e}", "ERROR")
+            return {}
 
     def start_data_fetch_in_thread(self, gui_config):
         self.config = gui_config; self.stop_event.clear()
@@ -41,23 +45,44 @@ class Engine:
         try:
             self.log("="*80 + "\n--- Running Data Fetch ---", 'HEADER')
             self.update_progress(0.1, "Starting data fetch...")
+            # Ensure file paths in config are absolute for robustness
+            for key, path in self.config['file_paths'].items():
+                if not os.path.isabs(path):
+                    self.config['file_paths'][key] = os.path.join(self.app_path, path)
+
             fetch_data.prepare_market_data(self.config, self.log)
         finally:
             self.log(f"--- Process Finished ---", "SUCCESS")
             self.update_progress(1.0, "Data Fetch Finished.")
             self.log("INTERNAL_STATE_UPDATE", "ANALYSIS_READY")
 
-
     def _run_analysis_flow(self, analysis_tasks):
-
         try:    
             self.log("\n" + "="*80 + "\n--- Running Analysis ---", 'HEADER'); self.update_progress(0.1, "Loading local data...")
+            
+            paths = self.config['file_paths']
+            n500_tickers_path = os.path.join(self.app_path, paths['n500_tickers_file'])
+            fno_tickers_path = os.path.join(self.app_path, paths['fno_tickers_file'])
+            n500_ohlcv_path = os.path.join(self.app_path, paths['n500_ohlcv_file'])
+            fno_ohlcv_path = os.path.join(self.app_path, paths['fno_ohlcv_file'])
+
             try:
-                n500_tickers = pd.read_csv(self.config['file_paths']['n500_tickers_file'])['Symbol'].tolist()
-                fno_tickers = pd.read_csv(self.config['file_paths']['fno_tickers_file'])['Symbol'].tolist()
-                n500_ohlcv = pd.read_csv(self.config['file_paths']['n500_ohlcv_file'], header=[0, 1], index_col=0, parse_dates=True)
-                fno_ohlcv = pd.read_csv(self.config['file_paths']['fno_ohlcv_file'], header=[0, 1], index_col=0, parse_dates=True)
-            except FileNotFoundError as e: self.log(f"ERROR: Could not load data file: {e}. Run 'Fetch Data' first.", "ERROR"); return
+                n500_tickers = pd.read_csv(n500_tickers_path)['Symbol'].tolist()
+                fno_tickers = pd.read_csv(fno_tickers_path)['Symbol'].tolist()
+                n500_ohlcv = pd.read_csv(n500_ohlcv_path, header=[0, 1], index_col=0, parse_dates=True)
+                fno_ohlcv = pd.read_csv(fno_ohlcv_path, header=[0, 1], index_col=0, parse_dates=True)
+            except FileNotFoundError as e: 
+                self.log(f"ERROR: Could not load data file: {e}. Run 'Fetch Data' first.", "ERROR"); return
+
+            self.log("INFO: Fetching latest NSE delivery percentage data...", "INFO")
+            delivery_df = fetch_delivery_data.get_latest_delivery_report(log_func=self.log)
+            if delivery_df.empty:
+                self.log("WARNING: Could not fetch delivery data. The 'High Delivery' signal will be disabled.", "WARNING")
+            else:
+                self.log(f"SUCCESS: Fetched delivery data for {delivery_df.attrs.get('date', 'N/A')}. Found {len(delivery_df)} records.", "SUCCESS")
+                delivery_df['Symbol'] = delivery_df['Symbol'] + '.NS'
+                delivery_df.set_index('Symbol', inplace=True)
+                
             for task_name in analysis_tasks: 
                 if self.stop_event.is_set(): return
                 self.log(f"\n--- Analyzing: {task_name} ---", "INFO")
@@ -72,7 +97,20 @@ class Engine:
                         stock_df = ohlcv_data.loc[:, (slice(None), symbol)]; stock_df.columns = stock_df.columns.droplevel(1)
                         if stock_df.empty or stock_df.isnull().all().all(): continue
                     except KeyError: continue
-                    enriched_df = indicators.add_all_indicators(stock_df.reset_index(), self.config['swing_rules'], self.config['momentum_rules'])
+                    
+                    # --- MODIFIED LOGIC: Look up Delivery % for BOTH N500 and F&O stocks ---
+                    delivery_perc = 0.0
+                    if not delivery_df.empty and symbol in delivery_df.index:
+                        delivery_perc = delivery_df.at[symbol, 'Delivery_Perc']
+                    
+                    # Pass the delivery percentage to the indicator function
+                    enriched_df = indicators.add_all_indicators(
+                        stock_df.reset_index(), 
+                        self.config['swing_rules'], 
+                        self.config['momentum_rules'],
+                        delivery_perc=delivery_perc
+                    )
+
                     if enriched_df is None or enriched_df.empty: continue
                     latest_row = enriched_df.iloc[-1]
                     signals = indicators.evaluate_swing_rules(latest_row, self.config['swing_rules']) if analysis_type == 'Swing' else indicators.evaluate_momentum_rules(latest_row, self.config['momentum_rules'])
@@ -84,20 +122,24 @@ class Engine:
                     self.analysis_reports[task_name] = final_report_df
                     self.log(f"SUCCESS: Analysis for {task_name} complete. Found {len(final_report_df)} potential signals.", "SUCCESS")
         finally:
-            self.log(f"--- Process Finished. Ready for Export. ---", "SUCCESS")
+            if self.stop_event.is_set():
+                self.log(f"--- Process Stopped by User ---", "WARNING")
+            else:
+                self.log(f"--- Process Finished. Ready for Export. ---", "SUCCESS")
             self.update_progress(1.0, "Analysis Finished.")
             self.log("INTERNAL_STATE_UPDATE", "EXPORT_READY")
-            
             
     def _run_export_flow(self):
         try:
             self.log("\n" + "="*80 + "\n--- Running Export ---", 'HEADER')
             if not self.analysis_reports:
                 self.log("WARNING: No analysis results to export. Run analysis first.", "WARNING"); return
+            
+            output_dir = self.config['file_paths']['output_dir']
+            if not os.path.isabs(output_dir):
+                self.config['file_paths']['output_dir'] = os.path.join(self.app_path, output_dir)
 
-            # Simplified export logic - only saves to Excel
             create_report.save_to_excel(self.analysis_reports, self.config, self.log)
-
         finally:
             self.log(f"--- Process Finished ---", "SUCCESS")
             self.update_progress(1.0, "Export Finished.")
