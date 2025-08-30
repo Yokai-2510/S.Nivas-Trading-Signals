@@ -55,7 +55,6 @@ def _calculate_monthly_cpr(data): # Calculates Monthly Central Pivot Range and n
     data['Is_Narrow_CPR'] = is_narrow
     return data
 
-### OPTIMIZATION 1: Replaced slow `.apply` loop with fast `pd.merge` operation
 def _calculate_weekly_cpr(data):
     data['Date'] = pd.to_datetime(data['Date'])
     if len(data) < 7:
@@ -83,7 +82,6 @@ def _calculate_weekly_cpr(data):
     data.drop(columns=['Year', 'Week', 'Prev_High', 'Prev_Low', 'Prev_Close'], inplace=True)
     return data
 
-### OPTIMIZATION 2: Replaced ultra-slow `_calculate_poc` with fast, vectorized VWAP
 def _calculate_vwap(data, period):
     typical_price_vol = (data['Close'] + data['High'] + data['Low']) / 3 * data['Volume']
     volume_sum = data['Volume'].rolling(window=period).sum()
@@ -126,7 +124,7 @@ def _detect_breakout(data):
 
 #---------- # MASTER INDICATOR APPLICATION FUNCTION ---------- 
 
-def add_all_indicators(data, swing_rules, momentum_rules):
+def add_all_indicators(data, swing_rules, momentum_rules, delivery_perc=0.0):
     if data is None or len(data) < 252: return None
     
     data['EMA_20'] = _calculate_ema(data, momentum_rules['ema_period_1'])
@@ -137,14 +135,14 @@ def add_all_indicators(data, swing_rules, momentum_rules):
     data['ATR_14'] = _calculate_atr(data, 14)
     data['ADX_14'] = _calculate_adx(data, swing_rules['adx_period'])
 
-    # --- New, complex indicators (NOW OPTIMIZED) ---
     data = _calculate_monthly_cpr(data)
     data = _calculate_weekly_cpr(data)
-    data['VWAP_60'] = _calculate_vwap(data, swing_rules.get('poc_period', 60)) # Using VWAP instead of POC
+    data['VWAP_60'] = _calculate_vwap(data, swing_rules.get('poc_period', 60))
     data['Candle_Pattern'] = _detect_candlestick_patterns(data)
     data['Is_52w_Breakout'] = _detect_breakout(data)
     
-    data['High_Delivery'] = False 
+    # Add the real delivery percentage value to the dataframe
+    data['Delivery_Perc_Value'] = delivery_perc
     
     return data.dropna(subset=['EMA_200', 'RSI_14', 'VWAP_60', 'ADX_14']).reset_index(drop=True)
 
@@ -159,10 +157,17 @@ def evaluate_swing_rules(row, rules):
     signals.append({'Criteria': '5. Bullish Reversal Candle', 'SignalBool': row['Candle_Pattern'] != "None", 'ThresholdValue': 'Engulf/Hammer/Inside', 'CurrentValue': row['Candle_Pattern']})
     signals.append({'Criteria': '6. Price > Top CPR (Narrow Monthly)', 'SignalBool': row['Close'] > row['Top_CPR'] and row['Is_Narrow_CPR'], 'ThresholdValue': f"> {row['Top_CPR']:.2f} & IsNarrow", 'CurrentValue': f"Price={row['Close']:.2f}, Narrow={row['Is_Narrow_CPR']}"})
     signals.append({'Criteria': '7. Price > Top CPR (Narrow Weekly)', 'SignalBool': row['Close'] > row['Weekly_Top_CPR'] and row['Is_Narrow_Weekly_CPR'], 'ThresholdValue': f"> {row['Weekly_Top_CPR']:.2f} & IsNarrow", 'CurrentValue': f"Price={row['Close']:.2f}, Narrow={row['Is_Narrow_Weekly_CPR']}"})
-    # UPDATED to check against VWAP instead of POC
     signals.append({'Criteria': '8. Price > VWAP (Volume Weighted Avg)', 'SignalBool': row['Close'] > row['VWAP_60'], 'ThresholdValue': f"> {row['VWAP_60']:.2f}", 'CurrentValue': f"{row['Close']:.2f}"})
     signals.append({'Criteria': f"9. ADX > {rules['adx_min']}", 'SignalBool': row['ADX_14'] > rules.get('adx_min', 20), 'ThresholdValue': f">{rules.get('adx_min', 20)}", 'CurrentValue': f"{row['ADX_14']:.2f}"})
-    signals.append({'Criteria': '10. High Delivery %', 'SignalBool': row['High_Delivery'], 'ThresholdValue': '> 35%', 'CurrentValue': "Not Implemented"})
+    
+    # INTEGRATION: Use the real delivery data from config
+    delivery_threshold = rules.get('delivery_perc_min', 35.0)
+    signals.append({
+        'Criteria': '10. High Delivery %',
+        'SignalBool': row['Delivery_Perc_Value'] > delivery_threshold,
+        'ThresholdValue': f'> {delivery_threshold}%',
+        'CurrentValue': f"{row['Delivery_Perc_Value']:.2f}%"
+    })
     return signals
 
 def evaluate_momentum_rules(row, rules):
@@ -174,9 +179,16 @@ def evaluate_momentum_rules(row, rules):
     signals.append({'Criteria': f"4. RSI > {rules['rsi_min']}", 'SignalBool': row['RSI_14'] > rules['rsi_min'], 'ThresholdValue': f">{rules['rsi_min']}", 'CurrentValue': f"{row['RSI_14']:.2f}"})
     signals.append({'Criteria': f"5. Volume > {rules['volume_factor']}x Avg", 'SignalBool': row['Volume'] > (row[avg_vol_col] * rules['volume_factor']), 'ThresholdValue': f">{(row[avg_vol_col] * rules['volume_factor']):,.0f}", 'CurrentValue': f"{row['Volume']:,.0f}"})
     signals.append({'Criteria': '6. Breakout (52-Week High)', 'SignalBool': row['Is_52w_Breakout'], 'ThresholdValue': "New 52w High", 'CurrentValue': f"Is Breakout: {row['Is_52w_Breakout']}"})
-    # UPDATED to check against VWAP instead of POC
     signals.append({'Criteria': '7. Price > VWAP (Volume Weighted Avg)', 'SignalBool': row['Close'] > row['VWAP_60'], 'ThresholdValue': f"> {row['VWAP_60']:.2f}", 'CurrentValue': f"{row['Close']:.2f}"})
     signals.append({'Criteria': '8. Price > Top CPR (Narrow Weekly)', 'SignalBool': row['Close'] > row['Weekly_Top_CPR'] and row['Is_Narrow_Weekly_CPR'], 'ThresholdValue': f"> {row['Weekly_Top_CPR']:.2f} & IsNarrow", 'CurrentValue': f"Price={row['Close']:.2f}, Narrow={row['Is_Narrow_Weekly_CPR']}"})
     signals.append({'Criteria': '9. EMA Stack (20>50>200)', 'SignalBool': row['EMA_20'] > row['EMA_50'] > row['EMA_200'], 'ThresholdValue': 'EMAs Aligned', 'CurrentValue': 'Stacked'})
-    signals.append({'Criteria': '10. High Delivery %', 'SignalBool': row['High_Delivery'], 'ThresholdValue': '> 40%', 'CurrentValue': "Not Implemented"})
+    
+    # INTEGRATION: Use the real delivery data from config
+    delivery_threshold = rules.get('delivery_perc_min', 40.0)
+    signals.append({
+        'Criteria': '10. High Delivery %',
+        'SignalBool': row['Delivery_Perc_Value'] > delivery_threshold,
+        'ThresholdValue': f'> {delivery_threshold}%',
+        'CurrentValue': f"{row['Delivery_Perc_Value']:.2f}%"
+    })
     return signals
